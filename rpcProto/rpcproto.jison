@@ -11,37 +11,9 @@
         }
         
     }
-    class NodeClass {
-        constructor(name,stats){
-            this.name = name;
-            this.node= stats;
-            this.parent = null;
-            this.node.setParent(this);
-        }
-        getClassId(){
-            let str=this.name;
-            let parent = this.parent;
-            while( !!parent ){
-                str=parent.name+"."+str;
-                parent = parent.parent;
-            }
-            return str;
-        }
-        genCode(){
-            return  `class ${this.getClassId() } {
-               ${this.node.genCode()}
-               }\n`
-        }
-        addNode(node){
-            this.node = node;
-        }
- 
-        setParent(parent){
-            this.parent = parent;
-        }
 
-    }
-    class NodeAssign {
+
+   class NodeAssign {
         constructor(type,name,value,array){
             this.type = type;
             this.name = name;
@@ -95,6 +67,97 @@
 
     }
 
+    class NodeArrayType{
+        constructor(type,isBuffer){
+            this.type = type;
+            this.isBuffer = isBuffer;
+        }
+
+    }
+
+    class NodeParam{
+        constructor(type,id,isArray){
+            this.isArray = isArray;
+            this.type = type;
+            this.id = id;
+        } 
+    }
+
+    class NodeVarDefine{
+        constructor(node){
+            this.node=node;
+        }
+    }
+
+    class NodeClass{
+        constructor(id){
+            this.id = id;
+            this.child=[] 
+        } 
+        addNode( varDefine){
+            this.child.push(varDefine);
+        }
+    }
+
+    class NodeService{
+        constructor(id){
+            this.id = id;
+            this.child = []
+        }
+        addNode(node){
+            this.child.push(node);
+        }
+    }
+
+
+
+    class NodeParams{
+        constructor(){
+            this.child=[];
+        }
+        addNode( paramNode){
+            this.child.push(paramNode);
+        }
+    }
+    
+    class NodeReturn{
+        constructor(type){
+            this.type = type;
+        }
+    }
+
+    class NodeFunction{
+        constructor(id,params,returnValue){
+            this.id = id;
+            this.params = params;
+            this.returnValue = returnValue;
+        }
+    }
+
+    class NodeRemote{
+        constructor(){
+            this.child = [];
+        }
+        addNode( nodeFunc){
+           this.child.push(nodeFunc);
+        }
+        
+    }
+
+    class NodeHandler{
+        constructor(){
+            this.child = [];
+        }
+        addNode( nodeFunc){
+           this.child.push(nodeFunc);
+        }
+        
+    }
+
+    
+
+
+
     class NodeProto{
        constructor(){
            this.node = []
@@ -126,7 +189,7 @@
 %%
 \s+                   /* skip whitespace */
 
-"int32"\b               return 'TYPE'  
+"int32"\b               {console.log(".....int32.....",yytext); return 'TYPE'}  
 "int64"\b               return 'TYPE'  
 "string"\b              return 'TYPE'  
 "float"\b               return 'TYPE'  
@@ -135,7 +198,7 @@
 "Array"\b               return 'ARRAY'
 "Buffer"\b              return 'BUFFER'
 
-"service"\b             return 'Service'
+"service"\b             {yytext=new NodeService();return 'Service'}
 "remote"\b              return 'Remote'
 "handler"\b             return 'Handler'
 "class"\b               {return 'Class'}
@@ -168,28 +231,32 @@
 
 
 
-ArrayType: BUFFER                      {console.log("param:",$1)}
-    | ARRAY "<" TYPE ">"            {console.log("param:",$1,$3)}
-    | ARRAY "<" ID ">"              {console.log("param:",$1,$3)}
-    | BUFFER "<" TYPE ">"           {console.log("param:",$1,$3)}
-    | BUFFER "<" ID ">"             {console.log("param:",$1,$3)}
+ArrayType: BUFFER                   {$$=new NodeArrayType(null,true);console.log("param:",$1)}
+    | ARRAY "<" TYPE ">"            {$$=new NodeArrayType($3,false); console.log("param:",$1,$3)}
+    | ARRAY "<" ID ">"              {$$=new NodeArrayType($3,false); console.log("param:",$1,$3)}
+    | BUFFER "<" TYPE ">"           {$$=new NodeArrayType($3,true) ;console.log("param:",$1,$3)}
+    | BUFFER "<" ID ">"             {$$=new NodeArrayType($3,true); console.log("param:",$1,$3)}
     ;
 
-param:TYPE ID                       {console.log("param:",$1,$2)}
-    | ID ID                         {console.log("param:",$1,$2)}               
-    | ArrayType ID                     {console.log("param:",$1,$2)}               
+param:TYPE ID                       {$$=new NodeParam($1,$2); console.log("param:",$1,$2)}
+    | ID ID                         {$$=new NodeParam($1,$2);console.log("param:",$1,$2)}               
+    | ArrayType ID                  {$$=new NodeParam($1,$2);console.log("param:",$1,$2)}               
     ;
 
 params:
-    |param
-    |param "," 
-    |params param
+    |param                          {$$=new NodeParams();$$.addNode($1); }
+    |param ","                      {$$=new NodeParams();$$.addNode($1); }
+    |params param                   {$$=$1;$$.addNode($2);}
+    |params param ","               {$$=$1;$$.addNode($2);}
     ;
 
-function: ID "(" params ")" ":" TYPE ";"  {console.log("func0",$1,$3,$6)}
+return:TYPE                         
+    |ArrayType
+    |ID
+    ;
+
+function: ID "(" params ")" ":" return ";"  {console.log("func0",$1,$3,$6)}
     | ID "(" params ")" ";"             {console.log("func1",$1,$3)}
-    | ID "(" params ")" ":" ID ";"      {console.log("func2",$1,$3,$6)}
-    | ID "(" params ")" ":" ArrayType ";"  {console.log("func3",$1,$3,$6)}
     ;
 
 functions:function
@@ -222,7 +289,7 @@ class:Class ID "{" typedefines "}"
 
 
 
-service:Service ID "{" service_body "}"
+service:Service ID "{" service_body "}" {console.log("..... service....",$1)}
         ;
 
 namespace:Namespace ID ";";
