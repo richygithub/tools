@@ -1,8 +1,14 @@
 
 const pretty=require('prettier')
+const fs=require('fs');
+const Enter = require('./js/rpcenter').Enter
 
+class Player{
+
+}
+Player.varLen = true;
 class TypeFloat{
-    constructor(id){
+    constructor(id=""){
         this.id = id;
         this.type ="number";
     }
@@ -12,8 +18,7 @@ class TypeFloat{
     toDefStr(){
         return `${this.id}:number`
     }
-    serialize(buf,offset,own){
-        let pre=own?`${own}.`:"";
+    serialize(buf,offset,pre){
         return `${buf}.writeFloatBE(${pre}${this.id},${offset});
                 ${offset}+=${this.len()};
         `;
@@ -31,7 +36,7 @@ class TypeFloat{
 
 }
 class TypeDouble{
-    constructor(id){
+    constructor(id=""){
         this.id = id;
         this.type ="number";
  
@@ -45,8 +50,7 @@ class TypeDouble{
     dval(){
         return 0;
     }
-    serialize(buf,offset,own){
-        let pre=own?`${own}.`:"";
+    serialize(buf,offset,pre){
         return `${buf}.writeDoubleBE(${pre}${this.id},${offset});
                 ${offset}+=${this.len()};
         `;
@@ -64,7 +68,7 @@ class TypeDouble{
 
 
 class TypeInt{
-    constructor(id){
+    constructor(id=""){
         this.id = id;
         this.type ="number";
  
@@ -78,8 +82,7 @@ class TypeInt{
     dval(){
         return 0;
     }
-    serialize(buf,offset,own){
-        let pre=own?`${own}.`:"";
+    serialize(buf,offset,pre){
         return `${buf}.writeInt32BE(${pre}${this.id},${offset});
                 ${offset}+=${this.len()};
         `;
@@ -96,7 +99,7 @@ class TypeInt{
 }
 
 class TypeLong{
-    constructor(id){
+    constructor(id=""){
         this.id = id;
         this.type ="number";
  
@@ -110,8 +113,7 @@ class TypeLong{
     dval(){
         return 0;
     }
-    serialize(buf,offset,own){
-        let pre=own?`${own}.`:"";
+    serialize(buf,offset,pre){
         return `${buf}.writeDoubleBE(${pre}${this.id},${offset});
                 ${offset}+=${this.len()};
         `;
@@ -123,11 +125,33 @@ class TypeLong{
         `;
     }
 
+}
 
+class TypeVoid{
+    constructor(){
+        this.id=""
+        this.type="void"
+    }
+    len(){
+        return ""
+    }
+    toDefStr(){
+         return ""
+    }
+    dval(){
+        return ""
+    }
+    serialize(buf,offset,pre){
+       return ""
+    }
+    deserialize(buf,offset,pre){
+       return ""
+   }
 
 }
+
 class TypeBool{
-    constructor(id){
+    constructor(id=""){
         this.id = id;
         this.type ="boolean";
  
@@ -141,8 +165,7 @@ class TypeBool{
     dval(){
         return false;
     }
-    serialize(buf,offset,own){
-        let pre=own?`${own}.`:"";
+    serialize(buf,offset,pre){
         return `${buf}.writeInt8BE(${pre}${this.id},${offset});
                 ${offset}+=${this.len()};
         `;
@@ -159,19 +182,15 @@ class TypeBool{
 }
 
 class TypeString{
-    constructor(id){
+    constructor(id=""){
         this.id = id;
         this.varLen = true;
         this.headLen = 2;  // max string len:64K
         this.type ="string";
  
     }
-    len(own){
-        let pre=""
-        if(own){
-            pre=`${own}.`
-        }
-        return `Buffer.byteLength(${pre}${this.id})`;
+    len(pre){
+       return `Buffer.byteLength(${pre}${this.id})`;
     }
     toDefStr(){
         return `${this.id}:string`
@@ -179,13 +198,12 @@ class TypeString{
     dval(){
         return `""`;
     }
-    serialize(buf,offset,own){
-        let pre=own?`${own}.`:"";
+    serialize(buf,offset,pre=""){
 
-        let lenval=`${pre.replace(/\./g,'_')}_${this.id}_len`;
-
+//        let lenval=`${pre.replace(/\./g,'_')}_${this.id}_len`;
+        let lenval=`_${this.id}_len`;
         let str = `
-        let ${lenval} = ${this.len(own)};
+        let ${lenval} = ${this.len(pre)};
         ${buf}.writeUInt16BE(${lenval},${offset});
                 ${offset}+=${this.headLen};
         `;
@@ -212,22 +230,18 @@ class TypeString{
 }
 
 class TypeUser{
-    constructor(type,id){
+    constructor(type,id=""){
         this.type = type;
         this.id = id;
         this.headLen=4;
+        this.varLen = eval(`${type}.varLen`)
     }
-    len(own){
-        if( this.type.varLen ){
+    len(pre){
+        if( this.varLen ){
 //            return `${this.type}.len(${this.id})`;
         }else{
 //            return `${this.type}.length`;
         }
-        let pre=""
-        if(own){
-            pre=`${own}.`
-        }
-
         return `${this.type}.len(${pre}${this.id})`;
     }
     toDefStr(){
@@ -236,12 +250,19 @@ class TypeUser{
     dval(){
         return null;
     }
+    serialize(buf,offset,pre){
+        return `${offset}+=${this.type}.serialize(${pre}${this.id},${buf},${offset});`
+    }
 
+    deserialize(buf,offset,pre){
+      //  let str=``
+       return `${offset}+= ${this.type}.deserialize(${pre}${this.id},${buf},${offset});`
+    }
 
 }
 
 class TypePB{
-    constructor(type,id){
+    constructor(type,id=""){
         this.type = type;
         this.id = id;
         this.varLen = true;
@@ -262,13 +283,13 @@ class TypePB{
 }
 
 class TypeBuffer{
-    constructor(type,id){
+    constructor(type,id=""){
         this.id = id;
         this.type = type;
         this.headLen=4;
     }
-    len(){
-        return `${this.id}.length`;
+    len(pre){
+        return ` (!!${pre}${this.id}?${pre}${this.id}.length:0)`;
     }
     toDefStr(){
         if( !!this.id ){
@@ -280,11 +301,43 @@ class TypeBuffer{
     dval(){
         return null;
     }
+    serialize(buf,offset,pre=""){
+
+        let lenval=`_${this.id}_len`;
+
+        let str = `
+        let ${lenval} = ${this.len(pre)};
+        ${buf}.writeUInt32BE(${lenval},${offset});
+        ${offset}+=${this.headLen};
+ 
+
+        if(!!${pre}${this.id}){
+            ${buf}.copy(${pre}${this.id},0,${offset});
+            ${offset}+=${lenval};
+        }
+
+      `;
+        return str;
+    }
+    deserialize(buf,offset,pre=""){
+//        let lenval=`${pre.replace(/\./g,'_')}_${this.id}_len`
+        let lenval=`_${this.id}_len`
+        let str = `
+        let ${lenval} = ${buf}.readUInt32BE(${offset});
+        ${offset}+=${this.headLen};
+        ${pre}${this.id}= Buffer.from(${buf}.buffer,${offset},${lenval});
+        ${offset}+=${lenval};
+        `
+        return str;        
+
+    }
+
+
 
 
 }
 class TypeArray{
-    constructor(type,id){
+    constructor(type,id=""){
         this.eleType = type;
 
         this.type= `Array<${this.eleType.type}>`;  // 
@@ -293,16 +346,15 @@ class TypeArray{
         this.id = id ;
         this.headLen=4;
     }
-    len(own){
-        if( this.type.varLen ){
-            return `not support var-len element in array. please use protobuf.`;
-        }else{
-            let pre="";
-            if( !!own ){
-                pre=`${own}.`
-            }
+    len(pre){
+        if( this.eleType.varLen ){
+            return `(!!${pre}${this.id}?${pre}${this.id}.reduce( (len,ele)=>{
+                return len+=${this.eleType.len("ele")}
+            },0):0)` ;
 
-            return `${pre}${this.id}.length*${this.eleType.len("msg")}`
+        }else{
+
+            return `!!${pre}${this.id}?${pre}${this.id}.length*${this.eleType.len()}:0`
         }
     }
     toDefStr(){
@@ -311,54 +363,113 @@ class TypeArray{
     dval(){
         return null;
     }
+    serialize(buf,offset,pre=""){
 
+        let lenval=`_${this.id}_len`;
 
-
-}
-
-
-
-
-
-
-class NodeVarDefine{
-    constructor(node){
-        this.node=node;
+        let str = `
+        let ${lenval} = !!${pre}${this.id}?${pre}${this.id}.length:0;
+        ${buf}.writeUInt32BE(${lenval},${offset});
+        ${offset}+=${this.headLen};
+ 
+        if( ${lenval}>0){
+            for(let idx=0;idx<${lenval};idx++){
+                ${this.eleType.serialize(buf,offset,  pre+this.id+"[idx]" )}
+            }
+        }
+       `;
+        return str;
     }
+    deserialize(buf,offset,pre=""){
+//        let lenval=`${pre.replace(/\./g,'_')}_${this.id}_len`
+        let lenval=`_${this.id}_len`
+
+        let elename = `${pre.replace("let ","") }${this.id}[idx]`
+        let eleDeserial = `${this.eleType.deserialize(buf,offset,  elename )}`;
+ 
+        if( this.eleType instanceof TypeUser ){
+
+            eleDeserial = `${elename} = new ${this.eleType.type};
+            ${this.eleType.deserialize(buf,offset, elename )}`;
+ 
+        }
+
+        let str = `
+        let ${lenval} = ${buf}.readUInt32BE(${offset});
+        ${offset}+=${this.headLen};
+        ${pre}${this.id}= new ${this.type}();
+        for(let idx=0;idx<${lenval};idx++){
+            ${eleDeserial}            
+        }
+       `
+        return str;        
+
+    }
+
+
+
+
 }
+
 
 
 function rtrim(str,ch){
     return str.endsWith(ch)?str.substr(0,str.length-1):str;
 }
 
-function genLenStr(typeArray,own) {
+function genLenStr(typeArray,pre="") {
     let lenStr = typeArray.reduce((str, cur) => {
         if (!!cur.headLen) {
-            return str += `(${cur.headLen}+${cur.len(own)})+`;
+            return str += `(${cur.headLen}+${cur.len(pre)})+`;
         } else {
-            return str += `${cur.len(own)}+`;
+            return str += `${cur.len(pre)}+`;
         }
     }, "")
     return rtrim(lenStr, "+");
 }
+
 function genParamDef(typeArray,own){
     let paramDefine = typeArray.reduce((str, cur) => {
         return str += `${cur.toDefStr()},`;
     }, "")
     paramDefine = rtrim(paramDefine, ",");
     return paramDefine;
+}
 
+function genParamTran(typeArray,pre=""){
+    let paramDefine = typeArray.reduce((str, cur) => {
+        return str += `${pre}${cur.id},`;
+    }, "")
+    paramDefine = rtrim(paramDefine, ",");
+    return paramDefine;
+}
+
+
+function genSerialize(typeArray,buf,offset,pre){
+    let ss = typeArray.reduce((str,cur)=>{
+        return str+= `${cur.serialize(buf,offset,pre)}`
+    },"") 
+    return ss;
+}
+
+function genDeserialize(typeArray,buf,offset,pre){
+    let dss = typeArray.reduce((str,cur)=>{
+        return str+= `${cur.deserialize(buf,offset,pre)}`
+    },"") 
+    return dss;
 }
 
 class NodeClass{
     constructor(id){
         this.id = id;
         this.child=[] 
+        this.varLen=false;
     } 
     addNode( varDefine){
         this.child.push(varDefine);
+        this.varLen |= varDefine.varLen;
     }
+
     toDefStr(){
         let varDefine = this.child.reduce( (str,cur)=>{
             return str+=`${cur.toDefStr()};`;
@@ -381,9 +492,9 @@ class NodeClass{
 
         let lenStr = this.child.reduce( (str,cur)=>{
             if(!!cur.headLen){
-                return str+=`(${cur.headLen}+${cur.len("msg")})+`;
+                return str+=`(${cur.headLen}+${cur.len("msg.")})+`;
             }else{
-                return str+=`${cur.len("msg")}+`;
+                return str+=`${cur.len("msg.")}+`;
             }
         },"")
         lenStr=rtrim(lenStr,"+");
@@ -392,7 +503,7 @@ class NodeClass{
         this.child.forEach( type=>bVarLen|=type.varLen );
 
 
-        let str=`class ${this.id}{
+        let str=`export class ${this.id}{
             ${varDefine}
             constructor(${ctorDefine}){
                 ${assign}
@@ -401,52 +512,51 @@ class NodeClass{
             static len(msg:${this.id}){
                 return ${lenStr};
             }
+            static serialize(msg:${this.id},buf:Buffer,offset:number):number{
+
+                let orign = offset;
+                ${genSerialize(this.child,"buf","offset","msg.")}
+                return offset-orign;
+            }
+            static deserialize(msg:${this.id},buf:Buffer,offset:number):number{
+                let orign = offset;
+                ${genDeserialize(this.child,"buf","offset","msg.")}
+                return offset - orign;
+            }
         }`
         return str;
 
     }
 }
 
-class NodeService{
-    constructor(){
-        this.id=""
-        this.child = []
-    }
-    addNode(node){
-        this.child.push(node);
-    }
-    setId(id){
-        this.id = id;
-    }
-}
-
  
 
 
-
+function firstLetterUpper (str) {
+    return str.charAt(0).toUpperCase()+str.slice(1);
+};
 class NodeFunction{
     constructor(){
         this.id = null;
         this.params = [];
-        this.returnValue = new TypeUser('null');
+        this.returnValue =  new TypeVoid();//new TypeUser('null');
+        this.helperClass="";
+        this.handlerInterface="";
     }
 
     addParam(param){
         this.params.push(param);
     }
     
-    genHeplerClass(parent){
+    genHelpClass(serviceId){
 
         let paramDefine = genParamDef(this.params);
 
         let lenstr = genLenStr( this.params );
 
-        let ss = this.params.reduce((str,cur)=>{
-            return str+= `${cur.serialize("_buf","_offset")}`
-        },"") 
+        let className=`Rpc${ firstLetterUpper(this.id)}`
+        this.helperClass = className;        
 
-        let className=`Rpc_${this.id}`
-        
         let reqParamClass = "";
         if( this.params.length == 0){
 
@@ -471,22 +581,41 @@ class NodeFunction{
         head+=`type ${this.id}Handler =(${paramDefine})=>${this.id}HandlerRet;`;
 
 
-        let classDef = `class ${className}{
-            //static id:number = parent.count; 
+        let ssreq=``;
+        if( this.params.length==0 || (this.params.length==1&& this.params[0] instanceof TypeVoid ) ){
+            ssreq= `return null;`
+        }else{
+            ssreq =`let _buflen = ${lenstr};
+                let _buf=Buffer.alloc(_buflen);
+                let _offset=0;
+                ${genSerialize(this.params,"_buf","_offset","")}
+
+                return _buf; `;
+        }
+
+        let ssreply=``;
+        if(this.returnValue == null || this.returnValue instanceof TypeVoid ){
+            ssreply=`return null;`;
+        }else{
+            ssreply=`let _buflen = ${genLenStr( [this.returnValue] )};
+                let _buf = Buffer.alloc(_buflen);
+                let _offset = 0;
+                ${this.returnValue.serialize("_buf","_offset","")};
+                return _buf;`;
+        }
+
+        let classDef = `
+        export class ${className}{
+            static id:number = ${serviceId}; 
 
 
             static serializeReq( ${paramDefine} ):Buffer {
-                let _buflen = ${lenstr};
-                let _buf=Buffer.alloc(_buflen);
-                let _offset=0;
-                ${ss}
-
-                return _buf;
-            }
+                ${ssreq}
+           }
             static processReq(data:Buffer,handler:${this.id}Handler):${this.id}HandlerRet{
                 let _buf=data;
                 let _offset=0;
-                ${dss}
+                ${genDeserialize(this.params,"_buf","_offset","let ")}
                 return handler( ${  this.params.reduce( (str,cur)=>{
                     return str+= `${cur.id},`
                 },"").replace(/,$/g,'') } );
@@ -494,12 +623,8 @@ class NodeFunction{
             }
 
             static serializeReply(${this.returnValue.toDefStr()}):Buffer{
-                let _buflen = ${genLenStr( [this.returnValue] )};
-                let _buf = Buffer.alloc(_buflen);
-                let _offset = 0;
-                ${this.returnValue.serialize("_buf","_offset")};
-                return _buf;
-            }
+                ${ssreply}
+           }
             static deserializeReply(data:Buffer){
                 let _buf=data;
                 let _offset=0;
@@ -507,7 +632,7 @@ class NodeFunction{
                 return ${this.returnValue.id};
             }
 
-        }`
+        }\n`
         return head+classDef;
  
     }
@@ -526,7 +651,8 @@ class NodeFunction{
     }
 
 
-    genStub(className){
+    genStub(){
+        let className = this.helperClass;
         let str="";
         let returnStr=""
         let returnType="null"
@@ -544,7 +670,10 @@ class NodeFunction{
             as Promise<[${returnType},Error]>;
         }`;
 
-
+        this.handlerInterface = `${this.id}Handler:(${genParamDef(this.params)})=>`
+    }
+    genHandlerInterface(){
+        return  `${this.id}Handler:(${genParamDef(this.params)})=>Promise<[${this.returnValue.type},Error]>;`
     }
 }
 
@@ -563,18 +692,108 @@ class NodeRpc{
     setId(id){
         this.id = id ;
     }
-    genStub(parent){
-
-        let str=`class ${parent.id}${this.type}{
-            private client:RpcClient;
-            constructor(client:RpcClient){
-                this.client = client;
-            }
-
-         }`
-
+    genRpcClass(serviceId){
+        let genStr = this.child.reduce( (str,cur)=>{
+            return str+=cur.genHelpClass(serviceId);
+        })
+        return genStr;
     }
 
+
+}
+
+class NodeService{
+    constructor(){
+        this.id=""
+        this.child = []
+        this.serviceCount=0;
+    }
+    addNode(node){
+        this.child.push(node);
+    }
+    setId(id){
+        this.id = id;
+    }
+    genCode(ns,serviceCount ){
+        this.serviceCount = serviceCount;
+        let strStub = this.genStub();
+        let strHandler = this.genHandlerInterface();
+        let strRpc = this.genRpc();
+        let strType = this.genClass();
+
+        fs.writeFileSync( `${ns}-${this.id}-stub.ts`, strStub );
+        fs.writeFileSync( `${ns}-${this.id}-handler.ts`, strHandler);
+        fs.writeFileSync( `${ns}-${this.id}-rpc.ts`, strRpc);
+        fs.writeFileSync( `${ns}-${this.id}-type.ts`, strType);
+
+
+        console.log("start write stub");
+        fs.writeFileSync( `${ns}-${this.id}-stub.ts`, pretty.format(strStub,{parser:"typescript"}) ) ;
+        console.log("start write handler");
+        fs.writeFileSync( `${ns}-${this.id}-handler.ts`,  pretty.format(strHandler,{parser:"typescript"}) );
+        console.log("start write rpc");
+        fs.writeFileSync( `${ns}-${this.id}-rpc.ts`,  pretty.format(strRpc,{parser:"typescript"}) );
+        console.log("start write type");
+        fs.writeFileSync( `${ns}-${this.id}-type.ts`,  pretty.format(strType,{parser:"typescript"}) );
+
+
+        return this.serviceCount;
+
+    }
+    genStub(){
+        let str='';
+        this.child.forEach( ele=>{
+            if( ele instanceof NodeRpc){
+                str+= ele.genStub();
+            }
+        })
+        
+        return `
+        interface Client{
+            req:(serviceId:number,data:Buffer,deserialize:(data:Buffer)=>any )=>Promise<[any,Error]>;
+        }
+
+        class Stub{
+            private client:Client;
+            constructor(client:Client){
+                this.client = client;
+            }
+            ${str}
+        }`
+
+    }
+    genRpc(){
+        let str='';
+        this.child.forEach( ele=>{
+            if( ele instanceof NodeRpc){
+                str+= ele.genRpcClass( this.serviceCount++);
+            }
+        })
+        return str;
+ 
+    }
+    genHandlerInterface(){
+        let str='';
+        this.child.forEach( ele=>{
+            if( ele instanceof NodeRpc){
+                str+= ele.genHandlerInterface()+"\n";
+            }
+        })
+
+        return `interface xxx{
+            ${str}
+        }`
+ 
+    }
+    genClass(){
+        let str='';
+        this.child.forEach( ele=>{
+            if( ele instanceof NodeClass ){
+                str+= ele.toDefStr();
+            }
+        })
+        return str;
+    }
 }
 
 
@@ -583,12 +802,18 @@ class NodeRoot{
     constructor(){
         this.id="";
         this.child=[];
+        this.serviceCount=0;
     }
     addNode(node){
         this.child.push(node)
     }
     setId(id){
         this.id = id;
+    }
+    genCode(){
+        for(let idx=0;idx<this.child.length;idx++){
+            this.serviceCount = this.child[idx].genCode( this.id,this.serviceCount);
+        }
     }
 }
 
@@ -617,6 +842,24 @@ let unresolved = {
 
 }
 
+module.exports = {
+    NodeClass,
+    NodeFunction,
+    NodeRpc,
+    NodeRoot,
+    NodeService,
+    TypeArray,
+    TypeBool,
+    TypeBuffer,
+    TypeDouble,
+    TypeFloat,
+    TypeInt,
+    TypeLong,
+    TypeString,
+    TypeUser,
+    TypeVoid,
+    TypePB
+}
 /*
 class Player{
     int id;
@@ -628,42 +871,61 @@ class Enter{
     Array<int> path;
 }
 */
+function test() {
 
-let v1 = new TypeInt("id");
-let v2 = new TypeString("name");
-let v3 = new TypeDouble("price");
-let v4 = new TypeUser("Player","acc");
+    let v1 = new TypeInt("id");
+    let v2 = new TypeString("name");
+    let v3 = new TypeDouble("price");
+    //let v4 = new TypeUser("Player","acc");
 
+    let vb = new TypeBuffer(null, "raw");
+    //let va = new TypeArray( new TypeInt(),"intarray" );
+    //console.log("str is:",pretty.format(funcstr,{parser:"typescript"}) );
 
-let func = new NodeFunction();
-func.id="enter";
-func.addParam(v1);
-func.addParam(v2);
-func.addParam(v3);
-func.returnValue = v2;
+    let va = new TypeArray(new TypeUser("Enter"), "path");
 
-let funcstr=  func.genHeplerClass(); 
+    let enter = new NodeClass("Enter");
+    enter.addNode(v1);
+    enter.addNode(v2);
 
-
-console.log(funcstr );
-let prettyFuncstr= pretty.format(funcstr,{parser:"typescript"});
-const fs=require('fs');
-fs.writeFileSync("enter.ts",prettyFuncstr);
-//console.log("str is:",pretty.format(funcstr,{parser:"typescript"}) );
-
-let v5 = new TypeArray( new TypeInt(),"path" );
-
-let enter = new NodeClass("Enter");
-enter.addNode(v1);
-enter.addNode(v2);
-
-enter.addNode(v3);
-enter.addNode(v4);
-enter.addNode(v5);
+    enter.addNode(v3);
+    //enter.addNode(v4);
+    enter.addNode(vb);
+    enter.addNode(va);
 
 
+    let str = enter.toDefStr();
 
-let str = enter.toDefStr();
+    console.log("write.. unpretty rpcenter");
+    fs.writeFileSync("rpcenter.ts", str);
 
-//console.log("str:",str);
-//console.log("str is:",pretty.format(str,{parser:"typescript"}) );
+
+    let rpcStr = pretty.format(str, { parser: "typescript" });
+    console.log("str is:", pretty.format(str, { parser: "typescript" }));
+    fs.writeFileSync("rpcenter.ts", rpcStr);
+
+
+    let func = new NodeFunction();
+    let vn = new TypeVoid();
+
+    func.id = "enter";
+    func.addParam(vn);
+    /*
+    func.addParam(v2);
+    func.addParam(v3);
+    func.addParam(vb);
+    func.addParam(va);
+    */
+
+    func.returnValue = vn;
+
+    let funcstr = func.genHeplerClass();
+
+    console.log("write unpretty enter.ts");
+    fs.writeFileSync("enter.ts", funcstr);
+
+    let prettyFuncstr = pretty.format(funcstr, { parser: "typescript" });
+    console.log("write pretty enter.ts:");
+    fs.writeFileSync("enter.ts", prettyFuncstr);
+
+}
