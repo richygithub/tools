@@ -1,204 +1,77 @@
 
 /* description: Parses and executes mathematical expressions. */
 %{
-    class Node{
-        constructor(){
-            this.type = 0;
-            this.name = "";
-        }
-        genCode(){
 
-        }
-        
-    }
+const pretty=require('prettier')
+const fs=require('fs');
 
+let {
+    NodeClass,
+    NodeFunction,
+    NodeRpc,
+    NodeRoot,
+    NodeService,
+    TypeArray,
+    TypeBool,
+    TypeBuffer,
+    TypeDouble,
+    TypeFloat,
+    TypeInt,
+    TypeLong,
+    TypeString,
+    TypeUser,
+    TypeVoid,
+    TypePB
+}  = require('./rpc.jison.js')
 
-   class NodeAssign {
-        constructor(type,name,value,array){
-            this.type = type;
-            this.name = name;
-            this.value = value;
-            this.array = array;
-        }
-        genCode(){
-            let str=''
-            let type = this.type;
-            if( !!userDefines[type] ){
-                type = userDefines[type].getClassId();
-            }
-            if(this.array){
-                str = `${type} ${this.name}[] ;`
-            }else{
-                str = `${type} ${this.name} ;`
-            }
-            return str;
-
-        }
-    }
-    class NodeMessageBody{
-        constructor(){
-            this.node=[ ];
-        }
-        addNode(node){
-            this.node.push( node );
-        }
-        genCode(){
-           let str = ''
-           this.node.forEach((node)=>{
-               if( node instanceof NodeClass ){
-
-               }else{
-                    str+=node.genCode();
-               }
-           })
-           return str;
-        }
-        setParent(parent){
-            if( !!parent){
-                this.node.forEach((node)=>{
-                    if( !!node.setParent ){
-                        node.setParent(parent);
-                    }
-                    
-                })
- 
-            }
-        }
-
-    }
-
-    class NodeArrayType{
-        constructor(type,isBuffer){
-            this.type = type;
-            this.isBuffer = isBuffer;
-        }
-
-    }
-
-    class NodeParam{
-        constructor(type,id,isArray){
-            this.isArray = isArray;
-            this.type = type;
-            this.id = id;
-        } 
-    }
-
-    class NodeVarDefine{
-        constructor(node){
-            this.node=node;
-        }
-    }
-
-    class NodeClass{
-        constructor(id){
-            this.id = id;
-            this.child=[] 
-        } 
-        addNode( varDefine){
-            this.child.push(varDefine);
-        }
-    }
-
-    class NodeService{
-        constructor(id){
-            this.id = id;
-            this.child = []
-        }
-        addNode(node){
-            this.child.push(node);
-        }
-    }
-
-
-
-    class NodeParams{
-        constructor(){
-            this.child=[];
-        }
-        addNode( paramNode){
-            this.child.push(paramNode);
-        }
-    }
-    
-    class NodeReturn{
-        constructor(type){
-            this.type = type;
-        }
-    }
-
-    class NodeFunction{
-        constructor(id,params,returnValue){
-            this.id = id;
-            this.params = params;
-            this.returnValue = returnValue;
-        }
-    }
-
-    class NodeRemote{
-        constructor(){
-            this.child = [];
-        }
-        addNode( nodeFunc){
-           this.child.push(nodeFunc);
-        }
-        
-    }
-
-    class NodeHandler{
-        constructor(){
-            this.child = [];
-        }
-        addNode( nodeFunc){
-           this.child.push(nodeFunc);
-        }
-        
-    }
-
-    
-
-
-
-    class NodeProto{
-       constructor(){
-           this.node = []
-       } 
-       addNode(node){
-           this.node.push(node);
-       }
-       genCode(){
-           let str = ''
-           this.node.forEach((node)=>{
-               str+=node.genCode();
-           })
-           return str;
-       }
-    }
-    let userDefines={
-
-    }
-    let unresolved = {
-
-    }
-    
+    let importfile="" 
 
   %}
 
 
 /* lexical grammar */
 %lex
+
+%x comment
+%x commentline
+%x import
+
 %%
 \s+                   /* skip whitespace */
 
-"int32"\b               {console.log(".....int32.....",yytext); return 'TYPE'}  
-"int64"\b               return 'TYPE'  
-"string"\b              return 'TYPE'  
-"float"\b               return 'TYPE'  
-"bool"\b                return 'TYPE'  
+"//"                    this.begin("commentline");
+<commentline>\r\n       this.popState();
+<commentline>\n         this.popState();
+<commentline>.          /*skip all character*/ 
+
+"/*"                    this.begin("comment")
+<comment>"*/"           this.popState()
+<comment>\s+            /* skip whitespace*/
+<comment>.             /*skip all character*/ 
+
+
+
+"import"\b              { this.begin("import");console.log("...begin import...") }
+<import>\r\n            { this.popState(); console.log("import:",importfile)}
+<import>\n              { this.popState(); console.log("import:",importfile)}}
+<import>.               importfile += yytext;
+
+
+
+"int32"\b               {yytext=new TypeInt() ; return 'TYPE'}  
+"int64"\b               {yytext=new TypeLong() ; return 'TYPE'}  
+"string"\b               {yytext=new TypeString() ; return 'TYPE'}  
+"float"\b               {yytext=new TypeFloat() ; return 'TYPE'}  
+"bool"\b               {yytext=new TypeBool() ; return 'TYPE'}  
+
+
+
+
 
 "Array"\b               return 'ARRAY'
 "Buffer"\b              return 'BUFFER'
 
-"service"\b             {yytext=new NodeService();return 'Service'}
+"service"\b             {return 'Service'}
 "remote"\b              return 'Remote'
 "handler"\b             return 'Handler'
 "class"\b               {return 'Class'}
@@ -231,84 +104,83 @@
 
 
 
-ArrayType: BUFFER                   {$$=new NodeArrayType(null,true);console.log("param:",$1)}
-    | ARRAY "<" TYPE ">"            {$$=new NodeArrayType($3,false); console.log("param:",$1,$3)}
-    | ARRAY "<" ID ">"              {$$=new NodeArrayType($3,false); console.log("param:",$1,$3)}
-    | BUFFER "<" TYPE ">"           {$$=new NodeArrayType($3,true) ;console.log("param:",$1,$3)}
-    | BUFFER "<" ID ">"             {$$=new NodeArrayType($3,true); console.log("param:",$1,$3)}
+ArrayType: BUFFER                   {$$=new TypeBuffer();console.log("param:",$1)}
+    | ARRAY "<" TYPE ">"            {$$=new TypeArray($3); console.log("param:",$1,$3)}
+    | ARRAY "<" ID ">"              {$$=new TypeArray(  new TypeUser($3) ); console.log("param:",$1,$3)}
     ;
 
-param:TYPE ID                       {$$=new NodeParam($1,$2); console.log("param:",$1,$2)}
-    | ID ID                         {$$=new NodeParam($1,$2);console.log("param:",$1,$2)}               
-    | ArrayType ID                  {$$=new NodeParam($1,$2);console.log("param:",$1,$2)}               
+param:TYPE ID                       {$$=$1;$$.id = $2 ; console.log("param:",$1,$2)}
+    | ID ID                         {$$=new TypeUser($1,$2);console.log("param:",$1,$2)}               
+    | ArrayType ID                  {$$=$1;$$.id = $2 ; console.log("param:",$1,$2)}               
     ;
 
-params:
-    |param                          {$$=new NodeParams();$$.addNode($1); }
-    |param ","                      {$$=new NodeParams();$$.addNode($1); }
-    |params param                   {$$=$1;$$.addNode($2);}
-    |params param ","               {$$=$1;$$.addNode($2);}
+funcparams:                         {$$=new NodeFunction()}
+    |param                          {$$=new NodeFunction();$$.addParam($1); }
+    |param ","                      {$$=new NodeFunction();$$.addParam($1); }
+    |funcparams param                   {$$=$1;$$.addParam($2);}
+    |funcparams param ","               {$$=$1;$$.addParam($2);}
     ;
 
-return:TYPE                         
-    |ArrayType
-    |ID
+return:TYPE                         {$$=$1 } 
+    |ArrayType                      {$$=$1 }
+    |ID                             {$$=new TypeUser($1); }
     ;
 
-function: ID "(" params ")" ":" return ";"  {console.log("func0",$1,$3,$6)}
-    | ID "(" params ")" ";"             {console.log("func1",$1,$3)}
+function: ID "(" funcparams ")" ":" return ";"  {$$=$3;$$.id = $1;$$.returnValue = $6;  console.log("func0",$1,$3,$6)}
+    | ID "(" funcparams ")" ";"                 {$$=$3;$$.id = $1;$$.returnValue = new TypeVoid();console.log("func1",$1,$3)}
     ;
 
-functions:function
-    |functions function
+functions:function              {$$=new NodeRpc(); $$.addNode($1) }
+    |functions function         {$$=$1;$$.addNode($2) } 
     ;
 
 
-remote: Remote "{" "}"
-      |Remote "{" functions "}"
-      |Remote "{" functions "}" ";"
+remote: Remote "{" "}"                      { $$ = new NodeRpc();$$.setType('remote') }
+      |Remote "{" functions "}"             { $$ = $3; $$.setType('remote') }
+      |Remote "{" functions "}" ";"         { $$ = $3; $$.setType('remote') }
       ;
 
-handler: Handler "{"   "}"
-      |Handler"{" functions "}"
-      |Handler "{" functions "}" ";"
+handler: Handler "{"   "}"                  {$$ = new NodeRpc();$$.setType('handler') }
+      |Handler"{" functions "}"             { $$ = $3; $$.setType("handler") }
+      |Handler "{" functions "}" ";"        { $$ = $3; $$.setType("handler") }
       ;
 
-typedefine:param ";"   
+typedefine:param ";"    {$$=$1} 
           ;
 
-typedefines:typedefine
-           |typedefine typedefines
+typedefines:typedefine                { $$=new NodeClass();$$.addNode($1)}
+           |typedefines typedefine    { $$=$1;$$.addNode($2)} 
            ;
 
 
-class:Class ID "{" typedefines "}"
-    | Class ID "{" typedefines "}" ";"
+class:Class ID "{" typedefines "}"       { $$=$4;$$.id=$2;}
+    | Class ID "{" typedefines "}" ";"   { $$=$4;$$.id=$2;}
     ;
 
 
 
 
-service:Service ID "{" service_body "}" {console.log("..... service....",$1)}
+service:Service ID "{" service_body "}" { $$=$4;$4.setId($2); }
         ;
 
-namespace:Namespace ID ";";
+namespace:Namespace ID ";"  {$$=$2};
 
-service_body:class
-        |handler
-        |remote
-        |service_body class
-        |service_body handler
-        |service_body remote
+service_body:class              {$$=new NodeService(); $$.addNode($1) }
+        |handler                {$$=new NodeService(); $$.addNode($1) }
+        |remote                 {$$=new NodeService(); $$.addNode($1) }
+        |service_body class     {$$=$1; $$.addNode($2) }
+        |service_body handler   {$$=$1; $$.addNode($2) }
+        |service_body remote    {$$=$1; $$.addNode($2) }
         ;
 
 
 expressions:
-        namespace
-        |service
-        |EOF
-        |expressions service
-        |expressions EOF
+        namespace               {$$=new NodeRoot();$$.setId($1)}
+        |service                {$$=new NodeRoot();$$.addNode($1)} 
+        |EOF                    {$$=new NodeRoot()}
+        |expressions namespace  {$$=$1;$$.setId($2)}
+        |expressions service    {$$=$1;$$.addNode($2)}
+        |expressions EOF        {console.log(" over....");parser.ast=$1;$1.genCode()}
         ;
 
 
