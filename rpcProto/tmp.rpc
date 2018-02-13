@@ -1,0 +1,55 @@
+
+import "./test.proto"
+import "./b.proto"
+
+namespace area;
+
+
+/* 
+    abcde 
+*/
+//
+
+
+
+
+service player{
+
+    class Pos{
+        float x;
+        float y;
+    }
+    class Path{
+        Array<Pos> pos;
+    }
+
+    class EnterReply{
+        string code;
+    };
+
+    remote{
+        enter(Path path ):EnterReply;
+
+        move(string name, Buffer msg,int32 b ):Buffer;
+
+        run(Array<Pos> path ):bool;
+
+
+
+    }
+
+    handler{
+        heartBeat();
+    }
+
+}
+
+service scene{
+    remote{
+        enter():bool;
+    }
+    handler{
+        enter():bool;        
+    }
+
+}
