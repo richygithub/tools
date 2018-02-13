@@ -1,6 +1,7 @@
 
 const pretty=require('prettier')
 const fs=require('fs');
+const path=require('path');
 
 let userDefines={
 
@@ -244,7 +245,6 @@ class TypeUser{
     }
     get varLen(){
         if( this._varLen === null ){
-            console.log("get varLen ...:",this.type);
             this._varLen = userDefines[this.type].varLen;
         }
     }
@@ -361,7 +361,6 @@ class TypeArray{
 
         this.type= `Array<${this.eleType.type}>`;  // 
 
-        console.log("type?");
         this.id = id ;
         this.headLen=4;
     }
@@ -492,7 +491,6 @@ class NodeClass{
         this._id = id;
         if( !!id ){
             userDefines[id] = this;
-            console.log("def NodeClass...:",id);
         }
     }
 
@@ -594,42 +592,20 @@ class NodeFunction{
         return `Rpc${ firstLetterUpper(this.id)}`
     }
 
-    genHelpClass(serviceId){
+    genRpcCode(serviceId){
 
+//        console.log("genHelpClass sid:",serviceId,this.id);
         let paramDefine = genParamDef(this.params);
 
         let lenstr = genLenStr( this.params );
 
         let className=`Rpc${ firstLetterUpper(this.id)}`
-
-        this.helperClass = className;        
-
-        let reqParamClass = "";
-        if( this.params.length == 0){
-
-        }if( this.params.length == 1){
-            reqParamClass = this.params[0].type;
-        }else{
-            let reqClassName = `${className}_Param`;
+        let iName =`I${ firstLetterUpper(this.id)}`
 
 
-            reqParamClass = `class ${reqParamClass}{
-
-            }`
-
-        }
-
-
-        let dss = this.params.reduce((str,cur)=>{
-            return str+= `${cur.deserialize("_buf","_offset","let ")}`
-        },"") 
-
-
-        console.log("????? root is null?",root==null);
         let head = `
         type ${this.id}HandlerRet = Promise<[${this.returnValue.type},Error]>;`;
         head+=`type ${this.id}Handler =(${paramDefine})=>${this.id}HandlerRet;`;
-
 
         let ssreq=``;
         if( this.params.length==0 || (this.params.length==1&& this.params[0] instanceof TypeVoid ) ){
@@ -654,27 +630,29 @@ class NodeFunction{
                 return _buf;`;
         }
 
-        let classDef = `
-        export class ${className}{
+        let interfaceDef = `
+        export abstract class ${iName}{
             static id:number = ${serviceId}; 
 
-
-            static serializeReq( ${paramDefine} ):Buffer {
-                ${ssreq}
-           }
-            static processReq(data:Buffer,handler:${this.id}Handler):${this.id}HandlerRet{
+            abstract handler(${paramDefine}):${this.id}HandlerRet;
+           processReq(data:Buffer):${this.id}HandlerRet{
                 let _buf=data;
                 let _offset=0;
                 ${genDeserialize(this.params,"_buf","_offset","let ")}
-                return handler( ${  this.params.reduce( (str,cur)=>{
+                return this.handler( ${  this.params.reduce( (str,cur)=>{
                     return str+= `${cur.id},`
                 },"").replace(/,$/g,'') } );
 
             }
 
-            static serializeReply(${this.returnValue.toDefStr()}):Buffer{
+            serializeReply(${this.returnValue.toDefStr()}):Buffer{
                 ${ssreply}
            }
+
+            static serializeReq( ${paramDefine} ):Buffer {
+                ${ssreq}
+            }
+ 
             static deserializeReply(data:Buffer):${this.returnValue.type} {
                 let _buf=data;
                 let _offset=0;
@@ -683,8 +661,34 @@ class NodeFunction{
             }
 
         }\n`
+
+        let classDef = `import {${iName} } from "./interface";
+            import {${Object.keys(userDefines).join()}} from "../type";
+            export default class ${className} extends ${iName}{
+
+                service:any;
+                constructor(service){
+                    super();
+                    this.service = service;
+                  }
+                async handler(${paramDefine}):Promise<[${this.returnValue.type},Error]>{
+                    let ret:${this.returnValue.type};
+                    //to do . assign to ret.
+
+                    return [ret,null];
+                }
+            }
+            
+        `
+        return { id:this.id,iname:iName,idef:head+interfaceDef,cname:className,cdef:classDef,stub:this.genStub(iName)  };
+        /*
+        let implfname=path.join(dir,`${this.id}.ts`);
+        if( !fs.exists(implfname) ){
+            fs.writeFileSync(implfname,pretty.format(classImpl,{parser:"typescript"}))
+        }
         return head+classDef;
- 
+        */
+
     }
 
     genParamDef(){
@@ -701,8 +705,7 @@ class NodeFunction{
     }
 
 
-    genStub(){
-        let className = this.helperClass;
+    genStub(className){
         let str="";
         let returnStr=""
         let returnType="null"
@@ -721,9 +724,7 @@ class NodeFunction{
 
         return str;
     }
-    genHandlerInterface(){
-        return  `${this.id}Handler:(${genParamDef(this.params)})=>Promise<[${this.returnValue.type},Error]>;`
-    }
+
 }
 
 class NodeRpc{
@@ -745,15 +746,22 @@ class NodeRpc{
         return this.child.map( cur=>cur.rpcClassName() ).join();
     }
 
-    genRpcClass(serviceId){
+    genRpcCode(){
+        return this.child.map( node=>{
+            console.log(`type:${this.type},count:${root[this.type+"Count"] }`)
+            return node.genRpcCode( root[`${this.type}Count`]++);
+        })
+    } 
+
+    genRpcClass(dir){
         let genStr = this.child.reduce( (str,cur)=>{
-            return str+=cur.genHelpClass(serviceId);
+            return str+=cur.genHelpClass(dir);
         },"")
         return genStr;
     }
-    genStub(){
+    genStub(serviceName){
         return this.child.reduce( (str,cur)=>{
-            return str+=cur.genStub();
+            return str+=cur.genStub(serviceName);
         },"")
  
     }
@@ -763,6 +771,19 @@ class NodeRpc{
             return str+=cur.genHandlerInterface();
         },"")
     }
+}
+
+
+function mkdir(dir) {
+    if (dir == null || dir.length <= 0) {
+        return null;
+    }
+    if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir);
+    }
+    console.log("mkdir...:", dir);
+    return dir;
+
 }
 
 class NodeService{
@@ -777,91 +798,117 @@ class NodeService{
     setId(id){
         this.id = id;
     }
-    genCode(ns,serviceCount ){
-        this.serviceCount = serviceCount;
+    genHandler(dir=""){
 
-        let importHead = `${root.genImportStr()};`;
-
-        let strRpc = importHead+this.genRpc();
-
-
-
-        let rpcfname = `${ns}-${this.id}-rpc`
-
-        let tmp="";
-        this.child.forEach( node=>{
-            if( node instanceof NodeRpc && node.type=="remote"){
-                tmp+=node.genRpcName();
+        this.child.forEach(node => {
+            if (node instanceof NodeRpc && node.type == "handler") {
+                handlerDir = mkdir(dir, "Handler");
+                strHandler = importHead + node.genRpcClass(handlerDir);
             }
         })
 
 
-        let rpcImportStr = `import {${tmp}} from "./${rpcfname}";`;
+    }
+    genRpcDir(noderpc,dir=""){
+        return path.join(dir,`${noderpc.id}${ firstLetterUpper(noderpc.type)}`) 
+    }
+    genCode(dir=""){
 
-        console.log(".................rpc.....",rpcImportStr);
-        let strStub = rpcImportStr+importHead+this.genStub();
-        console.log("..stub:",strStub);
-        let interfaceStr = this.genHandlerInterface(); 
-        let strHandler = rpcImportStr+importHead+interfaceStr.handler;
-        let strRemote= rpcImportStr+importHead+interfaceStr.remote;
- 
-//        let strType = this.genClass();
+        let importHead = `${root.genImportStr()};`;
 
-/*
-        fs.writeFileSync( `${ns}-${this.id}-type.ts`, strType);
-        console.log("start write type");
-        fs.writeFileSync( `${ns}-${this.id}-type.ts`,  pretty.format(strType,{parser:"typescript"}) );
-*/
-
-        fs.writeFileSync( `${rpcfname}.ts`, strRpc);
-        console.log("start write rpc");
-        fs.writeFileSync( `${rpcfname}.ts`,  pretty.format(strRpc,{parser:"typescript"}) );
-
-        fs.writeFileSync( `${ns}-${this.id}-stub.ts`, strStub );
-        console.log("start write stub");
-        fs.writeFileSync( `${ns}-${this.id}-stub.ts`, pretty.format(strStub,{parser:"typescript"}) ) ;
-
-        fs.writeFileSync( `${ns}-${this.id}-handler.ts`, strHandler);
-        console.log("start write handler");
-        fs.writeFileSync( `${ns}-${this.id}-handler.ts`,  pretty.format(strHandler,{parser:"typescript"}) );
-
-        fs.writeFileSync( `${ns}-${this.id}-remote.ts`, strRemote);
-        console.log("start write remote");
-        fs.writeFileSync( `${ns}-${this.id}-remote.ts`,  pretty.format(strRemote,{parser:"typescript"}) );
+        let remoteDir="";
+        let handlerDir="";
+        let strHandler="";
+        let strRemote="";
 
 
+        mkdir(dir);
 
-        return this.serviceCount;
+
+        let stubInfo=[];
+        let implFiles=[];
+
+        this.child.forEach( ele=>{
+            
+            if( ele instanceof NodeRpc ){
+                
+                let stubAll= `interface Client{
+                    req:(serviceId:number, data:Buffer , deserialize:(data:Buffer)=>any )=>Promise<[any,Error]>;
+                };
+                `;
+
+                let stubDep=[];
+                let strInterface=importHead;
+                let dirname = `${this.id}${ firstLetterUpper( ele.type ) }`;
+                let rpcdir = path.join(dir,dirname); //this.genRpcDir(ele,dir);
+                mkdir(rpcdir);
+                console.log("...............dir:",dir,ele.type,ele.id);
+
+                let codes = ele.genRpcCode( );
+                console.log("codes..",codes.length)
+
+                let stubStr="";
+                let rpcType = ele.type;
+                codes.forEach(ele => {
+                    console.log(`${ele.id},${ele.iname},${ele.cname}`)
+//                    strRemote = importHead + node.genRpcClass(remoteDir);
+                    strInterface += ele.idef;
+                    stubStr += ele.stub;
+                    stubDep.push(ele.iname);
+
+                    implFiles.push( { fname:`${dirname}/${ ele.id}`,type:rpcType} );
+                    fs.writeFileSync(path.join(rpcdir,`${ele.id}.ts`), pretty.format(ele.cdef,{parser:"typescript"} ) );
+
+                })
+
+
+                fs.writeFileSync(path.join(rpcdir,`interface.ts`), pretty.format(strInterface,{parser:"typescript"})  );
+
+                stubAll += `
+
+                    export class Stub{
+                        private client:Client;
+                        constructor(client:Client){
+                            this.client = client;
+                        }
+                        ${stubStr}
+                    }`
+                console.log("ele change?",ele.type,ele.id);
+                stubInfo.push( { id:this.id, str:stubAll,dep:stubDep,dir:dirname,type:ele.type });
+            }
+
+        })
+
+
+        return {stubInfo,implFiles};
 
     }
     genStub(){
-        let str='';
+        let str="";
         this.child.forEach( ele=>{
             if( ele instanceof NodeRpc && ele.type=="remote"){
-                str+= ele.genStub();
+                str+= ele.genStub(this.id);
             }
         })
         
         return `
-        interface Client{
-            req:(serviceId:number,data:Buffer,deserialize:(data:Buffer)=>any )=>Promise<[any,Error]>;
-        }
-
-        class Stub{
+    namespace ${this.id}{
+        export class Stub{
             private client:Client;
             constructor(client:Client){
                 this.client = client;
             }
             ${str}
-        }`
+        }
+    }`
 
     }
-    genRpc(){
+    genRpc(type){
         let str='';
         let self=this;
         this.child.forEach( ele=>{
-            if( ele instanceof NodeRpc){
-                str+= ele.genRpcClass( self.serviceCount++);
+            if( ele instanceof NodeRpc && ele.type == type ){
+                str+= ele.genRpcClass( );
             }
         })
         return str;
@@ -881,8 +928,8 @@ class NodeService{
             }
         })
 
-        return { handler:`interface handler{${handlerStr}}`,
-            remote:`interface remote{${remoteStr}}` }
+        return { handler:`export interface handler{${handlerStr}}`,
+            remote:`export interface remote{${remoteStr}}` }
     }
     genClass(){
         let str='';
@@ -902,6 +949,8 @@ class NodeRoot{
         this.id="";
         this.child=[];
         this.serviceCount=0;
+        this.remoteCount=0;
+        this.handlerCount=0;
         root = this;
         console.log("......... node root......");
 
@@ -912,48 +961,161 @@ class NodeRoot{
     setId(id){
         this.id = id;
     }
-    genImportStr(){
-       return `import {${Object.keys(userDefines).join()}} from "./${this.id}-type";`
+    genImportStr(fname="../type"){
+       return `import {${Object.keys(userDefines).join()}} from "${fname}";`
  
     }
-    genCode(){
+    genCode(basedir=""){
 
         let classdef = ''
         for(let key in userDefines ){
             let usertype = userDefines[key];
             classdef+= usertype.toDefStr();
         }
-        fs.writeFileSync( `${this.id}-type.ts`, classdef);
+
+        let dir= path.join(basedir,this.id);
+        if( !fs.existsSync(dir) ){
+            fs.mkdirSync(dir);
+        }
+
+
+        let typefpath = path.join( dir,`type.ts`);
+        fs.writeFileSync( typefpath, classdef);
         console.log("start write type");
-        fs.writeFileSync( `${this.id}-type.ts`,  pretty.format(classdef,{parser:"typescript"}) );
+        fs.writeFileSync( typefpath,  pretty.format(classdef,{parser:"typescript"}) );
+
+
+
+
+        let rpcImportStr=""
+        let rpcDef="";
+        let rpcCtor="";
+
+
+        let stubImportStr=this.genImportStr("./type");
+        let stubVarDef="";
+        let stubVarAssign="";
+        let stubBody="";
+
+
+        let stubDir = path.join(dir,"stub");
+        mkdir(stubDir);
+
+
+
+        let serviceImportStr="";
+        let serviceAssgin = "";
+        let serviceBody="";
+        let serviceFname=path.join(dir,"service.ts");
 
 
 
 
         for(let idx=0;idx<this.child.length;idx++){
-            this.serviceCount = this.child[idx].genCode( this.id,this.serviceCount);
+
+            let {stubInfo,implFiles} = this.child[idx].genCode( dir );
+            let service = this.child[idx];
+             
+            stubInfo.forEach( s=>{
+               let importStr=`import {${s.dep.join()}} from "../${s.dir}/interface";
+               ${this.genImportStr("../type")};
+               ` 
+               let fname = path.join(stubDir,`${service.id}-${s.type}-stub.ts` );
+
+               fs.writeFileSync( fname,  pretty.format(importStr+s.str,{parser:"typescript"}) );
+
+                if (s.type == "remote") {
+
+                    let stubClass = `${firstLetterUpper(service.id)}Stub`;
+                    /*
+                    stubBody += s.str;
+                    stubVarDef += `${service.id}:${stubClass};`
+                    stubVarAssign += `this.${service.id}= new ${stubClass}(client);`
+
+                    stubImportStr += `import {Stub as ${stubClass}} from "./${service.id}-${s.type}-stub";`
+                    */
+
+                    let sid = this.child[idx].id;
+                    rpcImportStr += `import {Stub as ${stubClass}} from "./${sid}-${s.type}-stub";`
+                    rpcDef += `${sid}:${stubClass};`
+                    rpcCtor += `this.${sid} = new ${stubClass}(client);`;
+
+                }
+           
+            })            
+
+            implFiles.forEach( impl=>{
+                console.log("process..",impl.fname);
+                let expName = impl.fname.replace("/","");
+                serviceImportStr+=`import {default as ${expName}} from "./${impl.fname}";`
+                serviceAssgin+=`this.${impl.type}[${expName}.id] = new ${expName}( this );`;
+            })
+
         }
+
+        console.log(".... import:", serviceImportStr);
+        let rpcStr=`
+        ${rpcImportStr}
+
+        interface Client{
+            req:(serviceId:number, data:Buffer , deserialize:(data:Buffer)=>any )=>Promise<[any,Error]>;
+        };
+        export class Rpc{
+            ${rpcDef}
+            constructor(client:Client){
+                ${rpcCtor}
+            }
+        }`;
+
+
+        let stubfpath = path.join( stubDir,`stub.ts`);
+        fs.writeFileSync( stubfpath, rpcStr);
+        console.log("start write stub");
+        fs.writeFileSync( stubfpath,  pretty.format(rpcStr,{parser:"typescript"}) );
+
+        serviceBody = `${serviceImportStr}
+            class Service{
+                remote:Array<any>;
+                handler:Array<any>;
+                app:any;
+                constructor(app){
+                    this.app = app;
+                    this.remote = new Array();
+                    this.handler= new Array();
+                    ${serviceAssgin}
+                }
+                async process(serviceId:number,type:string, data:Buffer) {
+                    let h=null;
+                    if( type == "remote"){
+                        h=this.remote
+                    }else if(type == "handler"){
+                        h=this.handler;
+                    }
+                    
+                    if( !h || !h[serviceId]){
+                        return [null,new Error(\`service invalid.type:\${type},serviceId:\${serviceId}\`)]
+                    }
+                    let ret = await h[serviceId].processReq(data);
+                    if( !!ret[1] ){
+                        //error.
+                        return ret;
+                    }
+                    return [ h[serviceId].serializeReply(ret[0]),null ] ;
+                }
+            
+            }
+        `
+        let sfpath = path.join( dir,`service.ts`);
+        fs.writeFileSync( sfpath, serviceBody);
+        console.log("start write service");
+        fs.writeFileSync( sfpath,  pretty.format(serviceBody,{parser:"typescript"}) );
+
+
+
     }
 }
 
 
-
-
-class NodeProto{
-   constructor(){
-       this.node = []
-   } 
-   addNode(node){
-       this.node.push(node);
-   }
-   genCode(){
-       let str = ''
-       this.node.forEach((node)=>{
-           str+=node.genCode();
-       })
-       return str;
-   }
-}
 
 
 module.exports = {
@@ -1010,12 +1172,10 @@ function test() {
 
     let str = enter.toDefStr();
 
-    console.log("write.. unpretty rpcenter");
     fs.writeFileSync("rpcenter.ts", str);
 
 
     let rpcStr = pretty.format(str, { parser: "typescript" });
-    console.log("str is:", pretty.format(str, { parser: "typescript" }));
     fs.writeFileSync("rpcenter.ts", rpcStr);
 
 
